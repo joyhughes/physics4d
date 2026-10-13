@@ -20,6 +20,7 @@ import {
   mIdentity, mApply, mApplyT, mCol, cayleyStep, orthonormalize, compound, m6Apply, solveN, solve4,
 } from './math4.js';
 import { collidePair } from './collide.js';
+import { polyHull, boxHull } from './polytopes.js';
 
 let nextId = 1;
 
@@ -43,22 +44,25 @@ export class Body {
     this.vp = [0, 0, 0, 0]; this.wp = bzero(); // pseudo velocities (position correction)
 
     const s = this.shape;
+    // convex hull data (vertices, cells, edges) for boxes and polychora
+    if (s.type === 'box') this.hull = boxHull(s.h);
+    else if (s.type === 'poly') this.hull = polyHull(s.kind, s.r);
     if (this.static) {
       this.mass = Infinity; this.invMass = 0;
       this.J = [0, 0, 0, 0, 0, 0]; this.Jinv = [0, 0, 0, 0, 0, 0];
     } else {
-      const vol = s.type === 'sphere' ? Math.PI ** 2 * s.r ** 4 / 2 : 16 * s.h[0] * s.h[1] * s.h[2] * s.h[3];
+      const vol = s.type === 'sphere' ? Math.PI ** 2 * s.r ** 4 / 2 : this.hull.vol;
       this.mass = o.mass ?? (o.density ?? 1000) * vol;
       this.invMass = 1 / this.mass;
       // second moments M_a = ∫ρ x_a² (per axis)
       const M = s.type === 'sphere'
         ? Array(4).fill(this.mass * s.r * s.r / (s.hollow ? 4 : 6))
-        : s.h.map(h => this.mass * h * h / 3);
+        : this.hull.second.map(k => this.mass * k);
       this.M = M;
       this.J = PAIRS6.map(([a, b]) => M[a] + M[b]);
       this.Jinv = this.J.map(j => 1 / j);
     }
-    this.radius = s.type === 'sphere' ? s.r : s.type === 'box' ? len(s.h) : Infinity;
+    this.radius = s.type === 'sphere' ? s.r : this.hull ? this.hull.radius : Infinity;
     this.update();
   }
 
@@ -73,14 +77,12 @@ export class Body {
       }
       this.invI = I;
     } else this.invI = ZERO36;
-    if (this.shape.type === 'box') {
-      const h = this.shape.h;
-      this.verts = [];
-      for (let b = 0; b < 16; b++) {
-        let p = this.x.slice();
-        for (let k = 0; k < 4; k++) p = addScaled(p, this.axes[k], (b >> k & 1 ? 1 : -1) * h[k]);
-        this.verts.push(p);
-      }
+    if (this.hull) {
+      // world vertices, and world cell hyperplanes n·x = d
+      const H = this.hull, R = this.R, x = this.x;
+      this.verts = H.verts.map(v => add(x, mApply(R, v)));
+      this.fn = H.normals.map(n => mApply(R, n));
+      this.fd = this.fn.map((n, f) => H.d[f] + dot(n, x));
     }
   }
 

@@ -29,7 +29,10 @@ await send('Page.navigate', { url: 'http://localhost:8940/#' + (scenes[0] ?? 'sl
 await new Promise(r => setTimeout(r, 4000));
 for (const s of scenes.length ? scenes : ['slices']) {
   await send('Runtime.evaluate', { expression: `__app.load('${s}')` });
+  // EVAL: script run before advancing (e.g. change a scene control, select a body)
+  if (process.env.EVAL) await send('Runtime.evaluate', { expression: process.env.EVAL });
   await send('Runtime.evaluate', { expression: `__app.advance(${process.env.ADV ?? 150})` });
+  if (process.env.EVAL2) await send('Runtime.evaluate', { expression: process.env.EVAL2 });
   await new Promise(r => setTimeout(r, 2500));
   const shot = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(out, s + '.png'), Buffer.from(shot.result.data, 'base64'));

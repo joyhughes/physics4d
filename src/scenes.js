@@ -6,8 +6,9 @@
 // `p` holds the scene's parameters, kept across resets.
 
 import { World, Body, BallJoint, HingeJoint, centralForce } from './world.js';
+import { POLYTOPES } from './polytopes.js';
 import {
-  mPlane, mMul, mApply, mCol, mIdentity, randomRotation, rng, biv, bsplit, len, sub, dot, scale, add,
+  mPlane, mMul, mApply, mCol, mIdentity, randomRotation, rng, biv, bsplit, len, sub, dot, scale, add, normalize, bdot, blen,
   PLANE_NAMES, AXIS_NAMES,
 } from './math4.js';
 
@@ -16,6 +17,57 @@ const PLANE_COLORS = ['#e8b04a', '#d9634f', '#d97aa6', '#6cbf6a', '#4fc1b8', '#4
 
 const ball = o => new Body({ ...o, shape: { type: 'sphere', r: o.r ?? 0.4, hollow: !!o.hollow } });
 const hbox = (h, o = {}) => new Body({ ...o, shape: { type: 'box', h: Array.isArray(h) ? h : [h, h, h, h] } });
+const poly = (kind, o = {}) => new Body({ ...o, shape: { type: 'poly', kind, r: o.r ?? 0.5 } });
+const KINDS = ['5-cell', '16-cell', '24-cell', '600-cell', '120-cell'];
+const KIND_COLOR = { '5-cell': C.red, '16-cell': C.blue, '24-cell': C.green, '600-cell': C.amber, '120-cell': C.violet };
+const deg = x => (x * 180 / Math.PI).toFixed(1) + '°';
+
+// a rotation taking orthonormal a1, a2 to orthonormal b1, b2
+function frameTo(a1, a2, b1, b2) {
+  const complete = (u, v) => {
+    const F = [u, v];
+    for (let k = 0; k < 4 && F.length < 4; k++) {
+      let e = [0, 0, 0, 0]; e[k] = 1;
+      for (const f of F) e = sub(e, scale(f, dot(e, f)));
+      if (len(e) > 1e-3) F.push(normalize(e));
+    }
+    return F;
+  };
+  const F = complete(a1, a2), T = complete(b1, b2), R = new Float64Array(16);
+  const build = () => { for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) R[i * 4 + j] = T.reduce((s, t, k) => s + t[i] * F[k][j], 0); };
+  build();
+  if (det4(R) < 0) { T[3] = scale(T[3], -1); build(); }
+  return R;
+}
+function det4(m) {
+  const a = Array.from(m), n = 4;
+  let d = 1;
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(a[r * 4 + c]) > Math.abs(a[p * 4 + c])) p = r;
+    if (p !== c) { for (let j = 0; j < 4; j++) [a[c * 4 + j], a[p * 4 + j]] = [a[p * 4 + j], a[c * 4 + j]]; d = -d; }
+    d *= a[c * 4 + c];
+    for (let r = c + 1; r < n; r++) { const f = a[r * 4 + c] / a[c * 4 + c]; for (let j = c; j < 4; j++) a[r * 4 + j] -= f * a[c * 4 + j]; }
+  }
+  return d;
+}
+// how many cells the current slice cuts through (= faces of the slice polyhedron)
+function sliceFaces(b, view) {
+  const sd = b.verts.map(p => (view ? view.toView(p)[3] - view.s0 : p[3]));
+  let n = 0;
+  for (const fv of b.hull.facetVerts) {
+    let lo = false, hi = false;
+    for (const i of fv) { if (sd[i] < 0) lo = true; else hi = true; }
+    if (lo && hi) n++;
+  }
+  return n;
+}
+// the cell a body rests flat on, if any
+function restingCell(b) {
+  for (const n of b.fn) if (n[1] < -0.995) return b.hull.cell;
+  return null;
+}
+const add6 = (a, b) => a.map((x, i) => x + b[i]);
 const fx = (x, d = 2) => (Math.abs(x) < 0.5 * 10 ** -d ? 0 : x).toFixed(d);
 const vec = (v, d = 2) => '(' + v.map(x => fx(x, d)).join(', ') + ')';
 
@@ -349,6 +401,154 @@ export const SCENES = [
           const blocks = world.bodies.filter(x => x.name.startsWith('block'));
           const offW = blocks.filter(x => Math.abs(x.x[3]) > 0.5).length;
           return [['blocks still standing', blocks.filter(x => x.x[1] > 0.4 * blocks.indexOf(x) + 0.1 && len(sub([x.x[0], 0, x.x[2], x.x[3]], [0, 0, 0, 0])) < 0.15).length + ' of 7'], ['blocks gone off into w', offW]];
+        },
+      };
+    },
+  },
+  {
+    id: 'polychora', kicker: 'Polychora', title: 'The regular polychora',
+    blurb: 'The five convex regular polychora, the 4D Platonic solids, float free. Each turns steadily, so you see a changing 3D slice of each one.',
+    notice: [
+      'Each slice is a polyhedron, and each of its faces is the slice of one cell. The face count in the readouts is the number of cells the slice cuts through.',
+      'Left to right: the 5-cell (5 tetrahedra), 16-cell (16 tetrahedra), 24-cell (24 octahedra, a shape with no 3D counterpart), 600-cell (600 tetrahedra) and 120-cell (120 dodecahedra). The tesseract (8 cubes) is the sixth; it is in the other scenes.',
+      'No motors drive them. A regular polychoron has the same inertia in all six planes, so any spin it is given just carries on: simple, double or isoclinic.',
+      'Drag the slice in w. The 600-cell and 120-cell are so nearly round that their slices barely change shape, only size, like a hypersphere\'s.',
+    ],
+    view: { cam: [0.01, 1.8, 7.5], target: [0, 0, 0], map: 3.5 },
+    world: { gravity: [0, 0, 0, 0], ground: false },
+    params: { spin: 'xw' },
+    build(w, p) {
+      const om = { xw: biv(0, 0, 0.45, 0, 0, 0), double: biv(0, 0, 0.45, 0.2, 0, 0), iso: biv(0.3, 0, 0, 0, 0, 0.3), none: biv() }[p.spin];
+      const bodies = KINDS.map((k, i) => w.add(poly(k, { name: k, r: 0.55, pos: [(i - 2) * 1.35, 0, 0, 0], omega: om, color: KIND_COLOR[k] })));
+      return {
+        controls: [{ label: 'Spin', options: [['xw', 'simple, in xw'], ['double', 'double, xw + yz'], ['iso', 'isoclinic, xy = zw'], ['none', 'still']], value: p.spin, set: (ctx, x) => { p.spin = x; ctx.reset(); } }],
+        readouts: world => bodies.map(b => [b.name + ' ' + b.hull.schlafli, `${b.hull.cells} ${b.hull.cellAdj} cells; slice has ${sliceFaces(b, world.view)} faces`]),
+      };
+    },
+  },
+
+  {
+    id: 'tipping', kicker: 'Polychora', title: 'Which polytopes roll?',
+    blurb: 'Six bodies of the same outer radius start at rest, each sitting on a cell, on a ramp whose slope you choose. A hypersphere always rolls. A polytope tips over only if the slope is steep enough.',
+    notice: [
+      'A polytope sitting on a cell tips when the slope carries its centre of mass past the edge of that cell, a 2-face in 4D. The readouts list each one\'s tipping angle.',
+      'More cells make a rounder body and a smaller tipping angle. What matters is the number of cells, not vertices: the 600-cell (600 cells, 120 vertices) tips at 7.8°, the 120-cell (120 cells, 600 vertices) only at 18°.',
+      'The 16-cell and 24-cell both tip at exactly 30°, the tesseract at 45° and the 5-cell at 52°. In 3D: a tetrahedron tips at 54.7°, a cube at 45°, an icosahedron at 20.9°.',
+      'Once tipped, a polytope rocks from cell to cell and loses energy at every landing. The next cell may sit less favourably on the slope: at 33° the 16-cell tips once and stops, while the 24-cell keeps going. The hypersphere rolls smoothly at ¾ g sin θ.',
+      'Watch the w-map: rocking polytopes drift off in w as well as z, because each new cell faces partly into w. They leave the slice while still on the ramp.',
+    ],
+    view: { cam: [-0.6, 4.6, 12.5], target: [0.6, 1.3, 0], map: 5 },
+    params: { slope: 20 },
+    build(w, p) {
+      const th = p.slope * Math.PI / 180, L = 3.6, R = mPlane(0, 1, -th), r = 0.32;
+      const c = [0, L * Math.sin(th) + 0.1, 0, 0];
+      w.add(hbox([L, 0.1, 3.3, 1.6], { static: true, pos: c, rot: R, friction: 1.6, color: C.stone, name: 'ramp' }));
+      w.add(hbox([0.1, 0.35, 3.3, 3], { static: true, pos: [L * Math.cos(th) + 1.6, 0.35, 0, 0], friction: 0.5, color: C.stone, name: 'stop' }));
+      const at = (s, hgt, z) => add(c, mApply(R, [s, 0.1 + hgt, z, 0]));
+      const kinds = ['600-cell', '120-cell', '24-cell', '16-cell', '5-cell'];
+      const racers = [w.add(ball({ name: 'hypersphere', r, pos: at(-L + 0.6, r, -2.75), friction: 1.6, restitution: 0, color: 0xdddddd }))];
+      racers[0].user.tip = 0;
+      kinds.forEach((k, i) => {
+        const b0 = poly(k, { r });
+        // cell 0 flat on the ramp, with its nearest edge facing downhill
+        const rot = frameTo(b0.hull.normals[0], b0.hull.tipDir, [0, -1, 0, 0], [1, 0, 0, 0]);
+        const b = w.add(poly(k, { name: k, r, pos: at(-L + 0.6, b0.hull.d[0] + 0.001, -2.75 + 1.1 * (i + 1)), rot: mMul(R, rot), friction: 1.6, restitution: 0, color: KIND_COLOR[k] }));
+        b.user.tip = b.hull.tipAngle;
+        racers.push(b);
+      });
+      for (const b of racers) b.user.x0 = b.x.slice();
+      const along = mCol(R, 0);
+      return {
+        controls: [{ label: 'Slope', options: [['5', '5°'], ['10', '10°'], ['20', '20°'], ['33', '33°'], ['55', '55°']], value: String(p.slope), set: (ctx, x) => { p.slope = +x; ctx.reset(); } }],
+        readouts: () => racers.map(b => {
+          const s = dot(sub(b.x, b.user.x0), along);
+          const still = len(b.v) < 0.05;
+          const state = s > 2 * L - 1.2 ? 'reached the bottom' : !still ? 'rolling' : s < 0.02 ? 'resting' : 'tipped, then stopped';
+          return [b.name, `${state}, ${fx(Math.min(2 * L, Math.max(0, s)), 1)} m${b.user.tip ? '; tips above ' + deg(b.user.tip) : '; always rolls'}`];
+        }),
+      };
+    },
+  },
+
+  {
+    id: 'steady', kicker: 'Polychora', title: 'Spins that never wobble',
+    blurb: 'A long hyperbox, a 24-cell and a 120-cell get the same spin, with the same tiny wobble. The hyperbox may tumble. The polychora never do, whatever the spin.',
+    notice: [
+      'The chart shows how much of each body\'s angular velocity still lies in its starting plane. The two polychora hold a flat line at 100%. The hyperbox, set spinning in xz or yw, flips away as in "Which spins are stable?".',
+      'The polychora have the same inertia in all six planes (see the readouts), like a hypersphere. Angular velocity is then angular momentum divided by a single number, and angular momentum is conserved, so the spin stays fixed in any plane or mix of planes.',
+      'Every regular polychoron is like this, and so is a tesseract with equal sides: their symmetry leaves no plane special. In 3D a cube, a regular tetrahedron and a ball all spin like this.',
+      'Choose a random spin. The hyperbox wanders chaotically, while the two polychora carry the same double rotation forever.',
+    ],
+    view: { cam: [0.01, 2.2, 6.5], target: [0, 0, 0], map: 3 },
+    world: { gravity: [0, 0, 0, 0], ground: false },
+    params: { spin: 'xz' },
+    build(w, p) {
+      const spins = { xz: biv(0, 2.2, 0, 0, 0, 0), yw: biv(0, 0, 0, 0, 2.2, 0), xy: biv(2.2, 0, 0, 0, 0, 0), random: biv(1.2, -0.8, 1.5, 0.6, -1.1, 0.9) };
+      const om = add6(spins[p.spin], [0.01, -0.012, 0.011, 0.009, -0.01, 0.013]);
+      const bodies = [
+        w.add(hbox([0.6, 0.45, 0.3, 0.15], { name: 'hyperbox', pos: [-1.9, 0, 0, 0], omega: om, color: C.stone })),
+        w.add(poly('24-cell', { name: '24-cell', r: 0.6, pos: [0, 0, 0, 0], omega: om, color: KIND_COLOR['24-cell'] })),
+        w.add(poly('120-cell', { name: '120-cell', r: 0.6, pos: [1.9, 0, 0, 0], omega: om, color: KIND_COLOR['120-cell'] })),
+      ];
+      const o0 = om.map(x => x / blen(om));
+      const kept = b => Math.max(0, bdot(b.w, o0) / blen(b.w));
+      return {
+        controls: [{ label: 'Spin', options: [['xz', 'in xz (box tumbles)'], ['yw', 'in yw (box tumbles)'], ['xy', 'in xy (box stable)'], ['random', 'random double rotation']], value: p.spin, set: (ctx, x) => { p.spin = x; ctx.reset(); } }],
+        readouts: () => bodies.map(b => {
+          const J = b.J, same = Math.max(...J) - Math.min(...J) < 1e-6 * Math.max(...J);
+          return [b.name + ' inertia', same ? `${fx(J[0], 2)} kg m² in all six planes` : J.map((j, i) => PLANE_NAMES[i] + ' ' + fx(j, 1)).join('  ')];
+        }),
+        chart: () => ({ label: 'share of spin still in the starting plane', series: bodies.map((b, i) => ({ name: b.name, color: ['#8a93a3', '#6cbf6a', '#a98ae0'][i], value: kept(b) })) }),
+      };
+    },
+  },
+
+  {
+    id: 'bin', kicker: 'Polychora', title: 'A bin of polychora',
+    blurb: 'A dozen polychora fall into a 4D bin and pile up. Each lands, rocks and comes to rest on one of its cells.',
+    notice: [
+      'A 4D bin has eight walls: the floor, and walls facing x, z and w (plus an open top). The two w walls are glass you never see in the slice; the w-map shows them.',
+      'A polychoron on the floor touches it across a whole cell, a solid 3D region: a tetrahedron for the 5-, 16- and 600-cells, an octahedron for the 24-cell, a dodecahedron for the 120-cell. The readouts count them.',
+      'Bodies at other w shrink and vanish from the slice, yet still fill the bin. Drag the slice to look through the pile layer by layer.',
+      '16-cells and 24-cells (and tesseracts) can fill 4D space with no gaps, the way cubes fill 3D. 5-cells, 120-cells and 600-cells cannot.',
+    ],
+    view: { cam: [3.4, 4.3, 5.2], target: [0, 1.0, 0], map: 2.2 },
+    params: { seed: 2 },
+    build(w, p) {
+      const o = { static: true, restitution: 0.2, friction: 0.4, color: C.stone, user: { glass: true } }, Hh = 1.6, t = 0.08, B = 0.85;
+      for (const s of [-1, 1]) {
+        w.add(hbox([t, Hh, B, B], { ...o, pos: [s * (B + t), Hh, 0, 0], name: 'x wall' }));
+        w.add(hbox([B, Hh, t, B], { ...o, pos: [0, Hh, s * (B + t), 0], name: 'z wall' }));
+        w.add(hbox([B, Hh, B, t], { ...o, pos: [0, Hh, 0, s * (B + t)], name: 'w wall' }));
+      }
+      const rand = rng(p.seed * 104729);
+      const mix = ['24-cell', '16-cell', '5-cell', '600-cell', '24-cell', '16-cell', '120-cell', '5-cell', '24-cell', '600-cell', '16-cell', '5-cell'];
+      const bodies = mix.map((k, i) => w.add(poly(k, {
+        name: k, r: k === '5-cell' ? 0.45 : 0.36,
+        pos: [(rand() - 0.5) * 0.9, 0.7 + i * 0.75, (rand() - 0.5) * 0.9, (rand() - 0.5) * 0.9],
+        rot: randomRotation(rand), omega: biv(...[0, 0, 0, 0, 0, 0].map(() => (rand() - 0.5) * 2)),
+        restitution: 0.15, friction: 0.5, color: KIND_COLOR[k],
+      })));
+      return {
+        controls: [
+          { label: 'New drop', run: ctx => { p.seed++; ctx.reset(); } },
+          { label: 'Shake the bin', run: () => { const r = rng(Date.now() & 0xffff); for (const b of bodies) { b.v = add(b.v, [(r() - 0.5) * 2, 2.5 + r() * 2, (r() - 0.5) * 2, (r() - 0.5) * 2]); } } },
+        ],
+        readouts: world => {
+          const still = bodies.filter(b => len(b.v) < 0.03).length;
+          const tally = {};
+          let piled = 0;
+          for (const b of bodies) {
+            const c = b.x[1] < b.hull.d[0] + 0.01 && restingCell(b);
+            if (c) tally[c] = (tally[c] ?? 0) + 1;
+            else if (len(b.v) < 0.03) piled++;
+          }
+          return [
+            ['at rest', still + ' of ' + bodies.length],
+            ['flat on the floor', Object.entries(tally).map(([c, n]) => `${n} on a${/^[aeiou]/.test(c) ? 'n' : ''} ${c}`).join(', ') || 'none yet'],
+            ['resting on other polychora', piled],
+            ['contact points', world.contacts.length],
+          ];
         },
       };
     },

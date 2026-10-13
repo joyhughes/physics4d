@@ -1,5 +1,7 @@
 // Headless checks of the 4D engine: conservation laws, contacts, rolling, joints.
 import { World, Body, BallJoint, HingeJoint, centralForce } from '../src/world.js';
+import { polyHull } from '../src/polytopes.js';
+import { gjk } from '../src/collide.js';
 import { bdot, mPlane, mMul, mIdentity, randomRotation, rng, biv, blen, bsub, len, sub, dot, mCol } from '../src/math4.js';
 
 let fails = 0;
@@ -143,6 +145,45 @@ function scale4(v, s) { return v.map(x => x * s); }
   let mx = 0;
   for (let i = 0; i < 120; i++) { w2.step(); mx = Math.max(mx, Math.abs(lj.angle())); }
   check('hinge limit stops the swing', mx > 0.45 && mx < 0.56, 'max |angle| ' + f(mx));
+}
+
+{ // 12. polychora: exact volumes, isotropic inertia, rest on a cell at the inradius
+  const exact = { '5-cell': Math.sqrt(5) / 96, '16-cell': 1 / 6, '24-cell': 2, '600-cell': 25 / 4 * (2 + Math.sqrt(5)), '120-cell': 15 / 4 * (105 + 47 * Math.sqrt(5)) };
+  for (const kind of Object.keys(exact)) {
+    const H = polyHull(kind, 1), rel = Math.abs(H.vol / H.edgeLength ** 4 / exact[kind] - 1);
+    const iso = Math.max(...H.second) - Math.min(...H.second);
+    check(kind + ' volume and isotropic inertia', rel < 1e-9 && iso < 1e-12, 'vol/a⁴ rel err ' + rel.toExponential(1));
+  }
+  for (const kind of ['5-cell', '24-cell', '120-cell']) {
+    const w = new World();
+    const b = w.add(new Body({ shape: { type: 'poly', kind, r: 0.5 }, pos: [0, 1.2, 0, 0], rot: randomRotation(rng(5)), omega: biv(1, -2, 0.5, 1.5, -1, 0.7) }));
+    let emin = w.energy().total, rise = 0;
+    for (let i = 0; i < 900; i++) { w.step(); const E = w.energy().total; rise = Math.max(rise, E - emin); emin = Math.min(emin, E); }
+    check(kind + ' settles on a cell', Math.abs(b.x[1] - Math.min(...b.hull.d)) < 0.003 && b.fn.some(n => n[1] < -0.999) && rise / b.mass < 0.01, 'y=' + f(b.x[1]) + ' inradius ' + f(Math.min(...b.hull.d)));
+  }
+}
+
+{ // 13. GJK distance between two polychora matches the best separating direction
+  const A = new Body({ shape: { type: 'poly', kind: '24-cell', r: 0.5 }, rot: randomRotation(rng(1)) });
+  const B = new Body({ shape: { type: 'poly', kind: '16-cell', r: 0.5 }, pos: [0.7, 0.5, 0.3, -0.2], rot: randomRotation(rng(2)) });
+  const sup = X => d => X.verts.reduce((m, v) => dot(v, d) > dot(m, d) ? v : m);
+  const g = gjk(sup(A), sup(B));
+  const n = sub(g.pb, g.pa).map(x => x / g.dist);
+  const gap = Math.min(...B.verts.map(v => dot(v, n))) - Math.max(...A.verts.map(v => dot(v, n)));
+  check('GJK distance is a true separation', Math.abs(gap - g.dist) < 1e-9, 'dist ' + f(g.dist) + ' gap along its normal ' + f(gap));
+}
+
+{ // 14. stack of 24-cells and a tesseract holds still
+  const w = new World();
+  const s = [
+    w.add(new Body({ shape: { type: 'poly', kind: '24-cell', r: 0.45 }, pos: [0, 0.5, 0, 0] })),
+    w.add(new Body({ shape: { type: 'poly', kind: '24-cell', r: 0.45 }, pos: [0.02, 1.4, 0, 0.01] })),
+    w.add(new Body({ shape: { type: 'box', h: [0.25, 0.25, 0.25, 0.25] }, pos: [0, 2.2, 0.03, 0] })),
+  ];
+  for (let i = 0; i < 900; i++) w.step();
+  const d = 0.45 / Math.SQRT2, want = [d, 3 * d, 4 * d + 0.25];
+  const err = Math.max(...s.map((b, i) => Math.abs(b.x[1] - want[i])));
+  check('polychoron stack rests at cell-to-cell heights', err < 0.004 && s.every(b => len(b.v) < 0.01), 'max height error ' + f(err));
 }
 
 console.log(fails ? fails + ' failed' : 'all passed');

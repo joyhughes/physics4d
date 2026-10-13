@@ -33,6 +33,7 @@ function load(id, keepView = false) {
   scene = SCENES.find(s => s.id === id) ?? SCENES[0];
   params[scene.id] ??= structuredClone(scene.params ?? {});
   world = new World(scene.world ?? {});
+  world.view = view; // scenes can read the slice
   hooks = scene.build(world, params[scene.id]) ?? {};
   view.setWorld(world);
   view.selected = null;
@@ -250,6 +251,7 @@ function showPick() {
   const t = document.createElement('dl');
   dl(t, [
     ['body', b.name + ' (' + fx(b.mass, 1) + ' kg)'],
+    ...(b.shape.type === 'poly' ? [['shape', `${b.shape.kind} ${b.hull.schlafli}: ${b.hull.cells} ${b.hull.cellAdj} cells, ${b.hull.verts.length} vertices`]] : []),
     ['position', '(' + b.x.map(x => fx(x)).join(', ') + ')'],
     ['velocity', '(' + b.v.map(x => fx(x)).join(', ') + ')'],
     ['rotation', describeRotation(b.w)],

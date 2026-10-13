@@ -1,6 +1,6 @@
 # Four-Space Mechanics
 
-A small rigid-body physics engine for **four spatial dimensions**, with ten
+A small rigid-body physics engine for **four spatial dimensions**, with fourteen
 teaching scenes. Plain ES modules, no build step; three.js is vendored.
 
 ```
@@ -11,7 +11,9 @@ node tools/spinplanes.mjs # which of a hyperbox's six spin planes are stable
 node tools/shot.mjs <dir> <scene…>   # headless Chrome screenshots (server must be running)
 ```
 
-## The engine (`src/world.js`, `src/collide.js`, `src/math4.js`)
+Live: https://joyhughes.github.io/physics4d/
+
+## The engine (`src/world.js`, `src/collide.js`, `src/math4.js`, `src/polytopes.js`)
 
 | | 3D (Rapier, block creatures) | 4D (this engine) |
 |---|---|---|
@@ -19,7 +21,7 @@ node tools/shot.mjs <dir> <scene…>   # headless Chrome screenshots (server mus
 | orientation | quaternion / 3×3 | 4×4 rotation matrix (Cayley steps, re-orthonormalised) |
 | angular velocity, momentum, torque | 3-vectors (axes) | **bivectors**, 6 parts: xy xz xw yz yw zw |
 | inertia | 3×3 tensor | 6×6 on bivectors; diagonal in the body frame, J_ab = M_a + M_b |
-| shapes | many | hyperspheres (solid or hollow), hyperboxes, half-space floor |
+| shapes | many | hyperspheres (solid or hollow), hyperboxes, the five convex regular polychora, half-space floor |
 | hinge | turns about a line | turns in a plane, holds the orthogonal plane fixed |
 | gravity of a point mass | 1/r² | 1/r³ (`centralForce`, exponent selectable) |
 
@@ -37,6 +39,17 @@ clip the incident cube's edges against the reference cube and the reference
 edges against the incident cube; edge–face contacts take the closest points of
 a segment and a square.
 
+The polychora (5-cell, 16-cell, 24-cell, 120-cell, 600-cell) are built in
+`src/polytopes.js` from their vertex sets and cell-centre directions, as in
+the [polychoron viewer](https://joyhughes.github.io/polychora/). Their volume
+and second moments come from an exact split into one 4-simplex per flag
+(centre, cell, 2-face, edge), and match the textbook volumes to 1e-13. Every
+regular polychoron has the same inertia in all six planes. Convex contact
+tests both shapes' cell normals as separating axes (cells are tried in order
+of a cheap lower bound, so few are checked), confirms with GJK, and clips the
+best cell against the most opposed cell of the other shape. Hyperboxes use
+the same hull description when they meet a polychoron.
+
 Joints correct drift inside the velocity solve (SHAKE-style). The
 split-impulse alternative drained ~7 % of a pendulum's energy every 10 s;
 this keeps it within 0.2 %.
@@ -53,11 +66,16 @@ this keeps it within 0.2 %.
 8. **The locked room**: a cube of walls doesn't trap a 4D ball; eight walls do.
 9. **Pendulums and the 4D hinge**: ball joint vs hinge plane, a double pendulum.
 10. **Toppling a tower**: stacking, friction and impacts.
+11. **The regular polychora**: the five 4D Platonic solids turning freely; their slices, and how many cells each slice cuts.
+12. **Which polytopes roll?**: on a slope you choose, each polytope tips over only above its tipping angle (600-cell 7.8°, 120-cell 18°, 16- and 24-cell 30°, tesseract 45°, 5-cell 52.2°).
+13. **Spins that never wobble**: a hyperbox tumbles; a 24-cell and a 120-cell, with isotropic inertia, keep any spin.
+14. **A bin of polychora**: a dozen polychora piled in an eight-walled 4D bin, resting on tetrahedral, octahedral and dodecahedral cells.
 
 ## Viewing
 
-The main view is the 3D slice w′ = s0. Hyperboxes cut into polyhedra coloured
-by facet axis (x red, y green, z blue, w amber); hyperspheres cut into spheres
+The main view is the 3D slice w′ = s0. Hyperboxes and polychora cut into
+polyhedra whose faces are coloured by the cell's body-frame direction (x red,
+y green, z blue, w amber); hyperspheres cut into spheres
 patterned by body-frame orthant so their 4D rotation shows. "Shadows" draws
 each whole body projected along w′, tinted amber at +w and cyan at −w. The
 w-map (bottom left) is the x–w plane from above; drag it to move the slice.

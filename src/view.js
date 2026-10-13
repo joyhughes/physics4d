@@ -142,7 +142,7 @@ export class View {
   makeItem(b) {
     const transparent = !!b.user.glass;
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide,
-      transparent, opacity: transparent ? 0.28 : 1, depthWrite: !transparent, flatShading: b.shape.type === 'box' });
+      transparent, opacity: transparent ? 0.28 : 1, depthWrite: !transparent, flatShading: !!b.hull });
     let slice;
     if (b.shape.type === 'sphere') {
       const g = this.sphereGeo.clone();
@@ -150,8 +150,8 @@ export class View {
       slice = new THREE.Mesh(g, mat);
     } else {
       const g = new THREE.BufferGeometry();
-      // 8 facets × up to 12 crossing points → fan triangles
-      const max = 8 * 12 * 3;
+      // each cell's slice is a polygon with at most one point per cell edge → fan triangles
+      const max = b.hull.facetEdges.reduce((s, e) => s + Math.max(0, e.length - 2), 0) * 3;
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(max * 3), 3));
       g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(max * 3), 3));
       g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(max * 3), 3));
@@ -166,8 +166,9 @@ export class View {
       ghost = new THREE.Mesh(this.sphereGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, depthWrite: false, wireframe: true }));
     } else {
       const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(32 * 2 * 3), 3));
-      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(32 * 2 * 3), 3));
+      const ne = b.hull.edges.length;
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ne * 2 * 3), 3));
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(ne * 2 * 3), 3));
       ghost = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: b.static ? 0.12 : 0.55, depthWrite: false }));
       ghost.frustumCulled = false;
     }
@@ -275,20 +276,13 @@ export class View {
       const t = a / (a - c), p = vs[i], q = vs[j];
       return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
     };
-    const col = new THREE.Color();
-    for (let k = 0; k < 4; k++) for (const sg of [0, 1]) {
-      // the facet's vertices have bit k = sg; its edges run along the other axes
+    const col = new THREE.Color(), H = b.hull, tint = this.cellTints(it);
+    for (let f = 0; f < H.normals.length; f++) {
+      // the cell's slice: one point where the slice crosses each of its edges
       const pts = [];
-      for (let i = 0; i < 16; i++) {
-        if ((i >> k & 1) !== sg) continue;
-        for (let j = 0; j < 4; j++) {
-          if (j === k || (i >> j & 1)) continue;
-          const p = cross(i, i | 1 << j);
-          if (p) pts.push(p);
-        }
-      }
+      for (const k of H.facetEdges[f]) { const p = cross(H.edges[k][0], H.edges[k][1]); if (p) pts.push(p); }
       if (pts.length < 3) continue;
-      const nw = mApply(this.V, b.axes[k].map(x => x * (sg ? 1 : -1)));
+      const nw = mApply(this.V, b.fn[f]);
       let n = [nw[0], nw[1], nw[2]];
       const nl = Math.hypot(...n);
       if (nl < 1e-6) continue;
@@ -299,8 +293,7 @@ export class View {
       const l1 = Math.hypot(...e1) || 1; e1 = sc3(e1, 1 / l1);
       const e2 = cr3(n, e1);
       pts.sort((p, q) => Math.atan2(dot3(sub3(p, c), e2), dot3(sub3(p, c), e1)) - Math.atan2(dot3(sub3(q, c), e2), dot3(sub3(q, c), e1)));
-      col.copy(it.base).lerp(this.tmpColor.set(AXIS_TINT[k]), b.static ? 0.12 : 0.38);
-      if (!sg) col.multiplyScalar(0.72);
+      col.copy(tint[f]);
       this.highlight(it, col);
       for (let i = 1; i + 1 < pts.length; i++) for (const p of [pts[0], pts[i], pts[i + 1]]) {
         if (nv >= P.count) break;
@@ -317,9 +310,8 @@ export class View {
     if (gh.visible) {
       const GP = gh.geometry.attributes.position, GC = gh.geometry.attributes.color;
       let e = 0;
-      for (let i = 0; i < 16; i++) for (let j = 0; j < 4; j++) {
-        if (i >> j & 1) continue;
-        for (const v of [i, i | 1 << j]) {
+      for (const ij of H.edges) {
+        for (const v of ij) {
           GP.setXYZ(e, vs[v][0], vs[v][1], vs[v][2]);
           wColor(sd[v], col, 0.8);
           GC.setXYZ(e, col.r, col.g, col.b);
@@ -328,6 +320,20 @@ export class View {
       }
       GP.needsUpdate = GC.needsUpdate = true;
     }
+  }
+
+  // each cell's colour, from its normal in the body frame: x red, y green,
+  // z blue, w amber, mixed by the squared components; darker for the negative side
+  cellTints(it) {
+    if (it.tints) return it.tints;
+    const b = it.body, axis = AXIS_TINT.map(c => new THREE.Color(c)), k = b.static ? 0.12 : 0.38;
+    return it.tints = b.hull.normals.map(n => {
+      const mix = new THREE.Color(0, 0, 0);
+      let a = 0;
+      for (let i = 0; i < 4; i++) { mix.add(axis[i].clone().multiplyScalar(n[i] * n[i])); if (Math.abs(n[i]) > Math.abs(n[a])) a = i; }
+      const c = it.base.clone().lerp(mix, k);
+      return n[a] < 0 ? c.multiplyScalar(0.72) : c;
+    });
   }
 
   drawTrail(it) {
