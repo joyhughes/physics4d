@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Four-Space Mechanics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a full-height instrument — 4D viewport on the left (with the w-map
+     inset), a scrolling lab-notes panel on the right; stacked on phones. */
+  :root {
+    --bg: #101318; --panel: #161a21; --raise: #1d222b; --line: #2a313c;
+    --fg: #dfe3ea; --muted: #8e97a7; --accent: #f0a040; --cool: #40b8e8;
+    --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+    --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+    --bg: #e9ecf1; --panel: #f6f7f9; --raise: #ffffff; --line: #d3d8e0;
+    --fg: #1b2029; --muted: #5c6575; --accent: #b86a10; --cool: #1a7fae; color-scheme: light; } }
+  :root[data-theme="light"] {
+    --bg: #e9ecf1; --panel: #f6f7f9; --raise: #ffffff; --line: #d3d8e0;
+    --fg: #1b2029; --muted: #5c6575; --accent: #b86a10; --cool: #1a7fae; color-scheme: light; }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.45 var(--body);
+    display: grid; grid-template-columns: minmax(0, 1fr) 380px; overflow: hidden; }
+  #stage { position: relative; min-width: 0; min-height: 0; }
+  #view { width: 100%; height: 100%; display: block; touch-action: none; }
+
+  #hud { position: absolute; left: 16px; top: 14px; right: 16px; pointer-events: none; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+  #hud .kicker { font: 600 12px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+  #hud h2 { margin: 4px 0 0; font: 600 26px/1.05 var(--display); letter-spacing: .01em; text-wrap: balance; }
+  #clock { font: 500 13px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  #mapwrap { position: absolute; left: 16px; bottom: 16px; width: 210px; background: color-mix(in srgb, var(--panel) 88%, transparent);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 8px 6px; backdrop-filter: blur(6px); }
+  #mapwrap .cap { display: flex; justify-content: space-between; font: 600 11px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  #map { width: 100%; aspect-ratio: 1; display: block; cursor: ns-resize; border-radius: 4px; touch-action: none; }
+  #legend { position: absolute; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px; font: 500 12px var(--mono); color: var(--muted);
+    background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  #legend .bar { width: 90px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #40b8e8, #c8ccd6, #f0a040); }
+
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding-block: 18px 32px; padding-inline: 18px; min-width: 0; }
+  header h1 { margin: 0; font: 700 22px/1 var(--display); letter-spacing: .04em; text-transform: uppercase; }
+  header h1 span { color: var(--accent); }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  h3 { font: 600 12px/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 22px 0 10px; }
+
+  #scenes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #scenes button { text-align: left; padding: 7px 9px 8px; display: grid; gap: 1px; }
+  #scenes button small { font: 600 10.5px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  #scenes button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--raise)); }
+  #scenes button.on small { color: var(--accent); }
+
+  button, select { font: 500 14px var(--body); color: var(--fg); background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 11px; cursor: pointer; }
+  button:hover, select:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  #blurb { margin: 0 0 10px; }
+  #notice { margin: 0; padding-left: 18px; display: grid; gap: 7px; color: var(--fg); font-size: 14px; }
+  #notice li::marker { color: var(--accent); }
+  #controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+  #controls label { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 6px 10px; font: 500 13px var(--mono); }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: color-mix(in srgb, var(--accent) 20%, var(--raise)); color: var(--fg); }
+  .slider { display: grid; grid-template-columns: 74px 1fr 58px; gap: 10px; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); }
+  .slider output { font: 500 12.5px var(--mono); color: var(--fg); text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .checks { display: flex; gap: 16px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .checks label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  input[type=checkbox] { accent-color: var(--accent); }
+
+  dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; font-size: 13px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font: 500 12.5px var(--mono); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  #chart { width: 100%; height: 110px; display: block; margin-top: 10px; background: var(--raise); border: 1px solid var(--line); border-radius: 6px; }
+  #chartkey { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font: 500 11.5px var(--mono); color: var(--muted); }
+  #chartkey i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .bivec { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-top: 8px; }
+  .bivec div { display: grid; gap: 3px; text-align: center; font: 500 11px var(--mono); color: var(--muted); }
+  .bivec b { font-weight: 500; color: var(--fg); }
+  #pick { font-size: 13px; color: var(--muted); }
+  .keys { color: var(--muted); font-size: 12.5px; margin-top: 18px; }
+  kbd { font: 500 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--raise); color: var(--fg); }
+
+  @media (max-width: 820px) {
+    body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 56vh auto; overflow: auto; height: auto; }
+    html, body { height: auto; }
+    #stage { height: 56vh; }
+    aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+    #mapwrap { width: 132px; padding: 6px; }
+    #legend { display: none; }
+    #hud h2 { font-size: 20px; }
+  }
+  #fail { position: absolute; inset: 70px 16px auto 16px; max-width: 560px; background: var(--raise); border: 1px solid var(--accent); border-radius: 8px; padding: 12px 14px; font: 500 13px/1.5 var(--mono); white-space: pre-wrap; }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="view"></canvas>
+  <div id="hud">
+    <div><div class="kicker" id="kicker"></div><h2 id="stitle"></h2></div>
+    <div id="clock">t = 0.00 s</div>
+  </div>
+  <div id="mapwrap">
+    <div class="cap"><span>w-map</span><span id="mapaxes">x → · w ↑</span></div>
+    <canvas id="map" width="400" height="400" aria-label="Map of the x–w plane. Drag up or down to move the slice."></canvas>
+  </div>
+  <div id="fail" hidden></div>
+  <div id="legend"><span>−w</span><span class="bar"></span><span>+w</span></div>
+</div>
+
+<aside>
+  <header>
+    <h1>Four-Space <span>Mechanics</span></h1>
+    <p>Newton's laws for rigid bodies in four spatial dimensions, seen one 3D slice at a time.</p>
+  </header>
+
+  <h3>Scenes</h3>
+  <div id="scenes"></div>
+
+  <h3>What to watch</h3>
+  <p id="blurb"></p>
+  <ul id="notice"></ul>
+  <div id="controls"></div>
+
+  <h3>Time</h3>
+  <div class="row">
+    <button id="play">Pause</button>
+    <button id="step">Step</button>
+    <button id="reset">Reset</button>
+    <div class="seg" id="speed"><button data-s="0.25">¼×</button><button data-s="0.5">½×</button><button data-s="1" class="on">1×</button><button data-s="2">2×</button></div>
+  </div>
+
+  <h3>Where you look</h3>
+  <div class="slider"><span>slice w</span><input id="slice" type="range" min="-3" max="3" step="0.01" value="0"><output id="sliceOut">0.00 m</output></div>
+  <div class="slider"><span>tilt xw</span><input id="tiltxw" type="range" min="0" max="90" step="1" value="0"><output id="tiltxwOut">0°</output></div>
+  <div class="slider"><span>tilt zw</span><input id="tiltzw" type="range" min="0" max="90" step="1" value="0"><output id="tiltzwOut">0°</output></div>
+  <div class="checks">
+    <label><input type="checkbox" id="ghosts" checked> Shadows</label>
+    <label><input type="checkbox" id="trails" checked> Trails</label>
+  </div>
+
+  <h3>Readouts</h3>
+  <dl id="readouts"></dl>
+  <canvas id="chart" width="680" height="220"></canvas>
+  <div id="chartkey"></div>
+
+  <h3>Conservation</h3>
+  <dl id="conserve"></dl>
+  <div class="bivec" id="bivec"></div>
+
+  <h3>Selected body</h3>
+  <div id="pick">Click a body in the view to inspect it.</div>
+
+  <p class="keys"><kbd>Space</kbd> pause · <kbd>[</kbd> <kbd>]</kbd> move slice · <kbd>R</kbd> reset · drag the w-map to move the slice</p>
+</aside>
+
+<script>
+  // If the app fails to start (a module that won't load, no WebGL), say so on
+  // the page instead of leaving an empty viewport.
+  (function () {
+    var errs = [];
+    function show(msg) {
+      var el = document.getElementById('fail');
+      if (!el) return;
+      el.hidden = false;
+      el.textContent = 'The simulation could not start.\n' + msg;
+    }
+    addEventListener('error', function (e) { errs.push(e.message || (e.target && e.target.src ? 'Could not load ' + e.target.src : 'error')); if (window.__app) show(errs.join('\n')); }, true);
+    addEventListener('unhandledrejection', function (e) { errs.push(String(e.reason)); });
+    setTimeout(function () { if (!window.__app) show(errs.join('\n') || 'The app script did not run. Try reloading the page.'); }, 6000);
+  })();
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

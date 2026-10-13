@@ -1,0 +1,7 @@
+{
+  "name": "physics4d",
+  "version": "1.0.0",
+  "description": "A 4D rigid-body physics engine with teaching scenes",
+  "type": "module",
+  "scripts": { "serve": "python3 serve.py", "test": "node tools/test.mjs" }
+}
