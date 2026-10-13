@@ -25,7 +25,7 @@ await send('Runtime.enable'); await send('Page.enable'); await send('Network.ena
 const [W, H] = (process.env.SIZE ?? '1400x900').split('x').map(Number);
 await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: W < 600 });
 if (process.env.SCHEME) await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: process.env.SCHEME }] });
-await send('Page.navigate', { url: 'http://localhost:8940/#' + (scenes[0] ?? 'slices') });
+await send('Page.navigate', { url: (process.env.BASE ?? 'http://localhost:8940/') + '#' + (scenes[0] ?? 'slices') });
 await new Promise(r => setTimeout(r, 4000));
 for (const s of scenes.length ? scenes : ['slices']) {
   await send('Runtime.evaluate', { expression: `__app.load('${s}')` });
